@@ -1,0 +1,52 @@
+# Build output
+bin/
+obj/
+publish/
+artifacts/
+
+# Dalamud/local plugin packaging output
+*.zip
+*.nupkg
+*.snupkg
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+
+# User/local IDE files
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.rsuser
+*.DotSettings.user
+
+# NuGet
+packages/
+*.nuget.props
+*.nuget.targets
+
+# Test and coverage output
+TestResults/
+coverage/
+coverage.xml
+coverage.cobertura.xml
+*.coverage
+*.coveragexml
+
+# Python test helpers/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Local test scripts and scratch files
+test_
+test_*
+*.log
+*.tmp

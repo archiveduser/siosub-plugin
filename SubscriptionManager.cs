@@ -10,7 +10,8 @@ public sealed class SubscriptionManager : IDisposable
     private const int MaxMessageRecords = 200;
     private readonly PluginConfiguration configuration;
     private readonly Func<string, string> resolveVariables;
-    private readonly Action<RoomConfiguration, string> printMessage;
+    private readonly Action<ListenerConfiguration, string> printMessage;
+    private readonly Action<ConnectionState, string, string> logStatus;
     private readonly Action saveConfiguration;
     private readonly object syncRoot = new();
     private readonly ConcurrentDictionary<Guid, SubscriptionStatus> statuses = new();
@@ -20,12 +21,14 @@ public sealed class SubscriptionManager : IDisposable
     public SubscriptionManager(
         PluginConfiguration configuration,
         Func<string, string> resolveVariables,
-        Action<RoomConfiguration, string> printMessage,
+        Action<ListenerConfiguration, string> printMessage,
+        Action<ConnectionState, string, string> logStatus,
         Action saveConfiguration)
     {
         this.configuration = configuration;
         this.resolveVariables = resolveVariables;
         this.printMessage = printMessage;
+        this.logStatus = logStatus;
         this.saveConfiguration = saveConfiguration;
     }
 
@@ -67,7 +70,7 @@ public sealed class SubscriptionManager : IDisposable
                 ServerUrl = subscription.ServerUrl,
                 State = subscription.Enabled ? ConnectionState.Disconnected : ConnectionState.Disabled,
                 Detail = subscription.Enabled ? "等待连接" : "已禁用",
-                Rooms = subscription.Rooms.Where(room => room.Enabled).Select(room => this.resolveVariables(room.Room)).ToArray(),
+                Events = subscription.Listeners.Where(listener => listener.Enabled).Select(listener => this.resolveVariables(listener.EventName)).ToArray(),
                 UpdatedAt = DateTimeOffset.Now,
             };
             this.statuses[subscription.Id] = status;
@@ -77,21 +80,22 @@ public sealed class SubscriptionManager : IDisposable
                 continue;
             }
 
-            var enabledRooms = subscription.Rooms
-                .Where(room => room.Enabled && !string.IsNullOrWhiteSpace(room.Room))
+            var enabledListeners = subscription.Listeners
+                .Where(listener => listener.Enabled && !string.IsNullOrWhiteSpace(listener.EventName))
                 .ToArray();
-            if (enabledRooms.Length == 0)
+            if (enabledListeners.Length == 0)
             {
                 status.State = ConnectionState.Disabled;
-                status.Detail = "没有启用的 room";
+                status.Detail = "没有启用的监听事件";
                 continue;
             }
 
             var socketConnection = new SocketConnection(
                 subscription,
-                enabledRooms,
+                enabledListeners,
                 status,
                 this.resolveVariables,
+                this.logStatus,
                 this.HandleMessage);
 
             lock (this.syncRoot)
@@ -113,14 +117,26 @@ public sealed class SubscriptionManager : IDisposable
         }
     }
 
+    public async Task DisconnectAsync()
+    {
+        var oldConnections = this.TakeConnections();
+
+        foreach (var connection in oldConnections)
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
+
+        foreach (var status in this.statuses.Values)
+        {
+            status.State = ConnectionState.Disconnected;
+            status.Detail = "未登录角色";
+            status.UpdatedAt = DateTimeOffset.Now;
+        }
+    }
+
     public void Dispose()
     {
-        List<SocketConnection> oldConnections;
-        lock (this.syncRoot)
-        {
-            oldConnections = [.. this.connections];
-            this.connections.Clear();
-        }
+        var oldConnections = this.TakeConnections();
 
         foreach (var connection in oldConnections)
         {
@@ -128,20 +144,30 @@ public sealed class SubscriptionManager : IDisposable
         }
     }
 
-    private void HandleMessage(SubscriptionConfiguration subscription, RoomConfiguration room, string resolvedRoom, string text)
+    private List<SocketConnection> TakeConnections()
+    {
+        lock (this.syncRoot)
+        {
+            var oldConnections = new List<SocketConnection>(this.connections);
+            this.connections.Clear();
+            return oldConnections;
+        }
+    }
+
+    private void HandleMessage(SubscriptionConfiguration subscription, ListenerConfiguration listener, string resolvedEvent, string text)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return;
         }
 
-        this.printMessage(room, text);
+        this.printMessage(listener, text);
         var record = new MessageRecord(
             DateTimeOffset.Now,
             subscription.Name,
-            resolvedRoom,
-            room.ChatType,
-            room.Tag,
+            resolvedEvent,
+            listener.ChatType,
+            listener.Tag,
             text);
 
         lock (this.syncRoot)
@@ -157,27 +183,27 @@ public sealed class SubscriptionManager : IDisposable
     private sealed class SocketConnection : IAsyncDisposable
     {
         private readonly SubscriptionConfiguration subscription;
-        private readonly IReadOnlyList<RoomConfiguration> rooms;
         private readonly SubscriptionStatus status;
-        private readonly Func<string, string> resolveVariables;
-        private readonly Action<SubscriptionConfiguration, RoomConfiguration, string, string> handleMessage;
-        private readonly Dictionary<string, RoomConfiguration> resolvedRooms;
+        private readonly Action<ConnectionState, string, string> logStatus;
+        private readonly Action<SubscriptionConfiguration, ListenerConfiguration, string, string> handleMessage;
+        private readonly Dictionary<string, ListenerConfiguration> resolvedEvents;
         private readonly SocketIOClient.SocketIO socket;
+        private bool disposing;
 
         public SocketConnection(
             SubscriptionConfiguration subscription,
-            IReadOnlyList<RoomConfiguration> rooms,
+            IReadOnlyList<ListenerConfiguration> listeners,
             SubscriptionStatus status,
             Func<string, string> resolveVariables,
-            Action<SubscriptionConfiguration, RoomConfiguration, string, string> handleMessage)
+            Action<ConnectionState, string, string> logStatus,
+            Action<SubscriptionConfiguration, ListenerConfiguration, string, string> handleMessage)
         {
             this.subscription = subscription;
-            this.rooms = rooms;
             this.status = status;
-            this.resolveVariables = resolveVariables;
+            this.logStatus = logStatus;
             this.handleMessage = handleMessage;
-            this.resolvedRooms = rooms
-                .Select(room => new { Config = room, Name = resolveVariables(room.Room) })
+            this.resolvedEvents = listeners
+                .Select(listener => new { Config = listener, Name = resolveVariables(listener.EventName) })
                 .Where(item => !string.IsNullOrWhiteSpace(item.Name))
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First().Config, StringComparer.OrdinalIgnoreCase);
@@ -185,20 +211,25 @@ public sealed class SubscriptionManager : IDisposable
             this.socket = new SocketIOClient.SocketIO(subscription.ServerUrl, new SocketIOOptions
             {
                 Path = subscription.Path,
+                ConnectionTimeout = TimeSpan.FromSeconds(10),
+                EIO = SocketIO.Core.EngineIO.V4,
+                AutoUpgrade = true,
                 Reconnection = true,
                 ReconnectionAttempts = int.MaxValue,
                 ReconnectionDelay = 2000,
             });
 
-            this.socket.OnConnected += async (_, _) =>
+            this.socket.OnConnected += (_, _) => this.SetStatus(ConnectionState.Connected, $"已连接; {subscription.ServerUrl}{subscription.Path}; 监听: {string.Join(", ", this.resolvedEvents.Keys)}");
+            this.socket.OnDisconnected += (_, reason) =>
             {
-                this.SetStatus(ConnectionState.Connected, "已连接");
-                await this.JoinRoomsAsync().ConfigureAwait(false);
+                if (!this.disposing)
+                {
+                    this.SetStatus(ConnectionState.Disconnected, reason);
+                }
             };
-            this.socket.OnDisconnected += (_, reason) => this.SetStatus(ConnectionState.Disconnected, reason);
-            this.socket.OnError += (_, error) => this.SetStatus(ConnectionState.Error, error);
+            this.socket.OnError += (_, error) => this.SetStatus(ConnectionState.Error, $"{subscription.ServerUrl}{subscription.Path}; {error}");
 
-            this.RegisterMessageHandlers();
+            this.RegisterEventHandlers();
         }
 
         public async Task ConnectAsync()
@@ -210,7 +241,7 @@ public sealed class SubscriptionManager : IDisposable
             }
             catch (Exception ex)
             {
-                this.SetStatus(ConnectionState.Error, ex.Message);
+                this.SetStatus(ConnectionState.Error, $"{this.subscription.ServerUrl}{this.subscription.Path}; {ex.Message}");
             }
         }
 
@@ -218,6 +249,7 @@ public sealed class SubscriptionManager : IDisposable
         {
             try
             {
+                this.disposing = true;
                 await this.socket.DisconnectAsync().ConfigureAwait(false);
                 this.socket.Dispose();
             }
@@ -227,64 +259,38 @@ public sealed class SubscriptionManager : IDisposable
             }
         }
 
-        private void RegisterMessageHandlers()
+        private void RegisterEventHandlers()
         {
-            this.socket.On(this.subscription.MessageEvent, response =>
+            foreach (var item in this.resolvedEvents)
             {
-                var payload = MessagePayload.FromResponse(response);
-                var targetRoom = payload.Room;
-
-                if (!string.IsNullOrWhiteSpace(targetRoom)
-                    && this.resolvedRooms.TryGetValue(targetRoom, out var room))
-                {
-                    this.handleMessage(this.subscription, room, targetRoom, payload.Text);
-                    return;
-                }
-
-                if (this.resolvedRooms.Count == 1)
-                {
-                    var only = this.resolvedRooms.First();
-                    this.handleMessage(this.subscription, only.Value, only.Key, payload.Text);
-                }
-            });
-
-            foreach (var item in this.resolvedRooms)
-            {
-                var resolvedRoom = item.Key;
-                var room = item.Value;
-                this.socket.On(resolvedRoom, response =>
+                var resolvedEvent = item.Key;
+                var listener = item.Value;
+                this.socket.On(resolvedEvent, response =>
                 {
                     var payload = MessagePayload.FromResponse(response);
-                    this.handleMessage(this.subscription, room, resolvedRoom, payload.Text);
+                    this.handleMessage(this.subscription, listener, resolvedEvent, payload.Text);
                 });
             }
         }
 
-        private async Task JoinRoomsAsync()
-        {
-            foreach (var resolvedRoom in this.resolvedRooms.Keys)
-            {
-                await this.socket.EmitAsync(this.subscription.JoinEvent, resolvedRoom).ConfigureAwait(false);
-            }
-
-            this.status.Rooms = this.resolvedRooms.Keys.ToArray();
-            this.status.UpdatedAt = DateTimeOffset.Now;
-        }
-
         private void SetStatus(ConnectionState state, string detail)
         {
+            var shouldLog = this.status.State != state || !string.Equals(this.status.Detail, detail, StringComparison.Ordinal);
             this.status.State = state;
             this.status.Detail = detail;
             this.status.UpdatedAt = DateTimeOffset.Now;
-            this.status.Rooms = this.resolvedRooms.Keys.ToArray();
+            this.status.Events = this.resolvedEvents.Keys.ToArray();
+
+            if (shouldLog)
+            {
+                this.logStatus(state, this.subscription.Name, detail);
+            }
         }
     }
 
     private sealed class MessagePayload
     {
         public string Text { get; init; } = string.Empty;
-
-        public string? Room { get; init; }
 
         public static MessagePayload FromResponse(SocketIOResponse response)
         {
@@ -316,14 +322,10 @@ public sealed class SubscriptionManager : IDisposable
                 ?? TryGetString(element, "message")
                 ?? TryGetString(element, "content")
                 ?? element.ToString();
-            var room = TryGetString(element, "room")
-                ?? TryGetString(element, "roomName")
-                ?? TryGetString(element, "channel");
 
             return new MessagePayload
             {
                 Text = text,
-                Room = room,
             };
         }
 

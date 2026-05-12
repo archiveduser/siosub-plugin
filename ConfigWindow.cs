@@ -91,11 +91,11 @@ internal static class ConfigWindow
             {
                 Name = $"订阅 {configuration.Subscriptions.Count + 1}",
                 ServerUrl = "http://127.0.0.1:3000",
-                Rooms =
+                Listeners =
                 [
-                    new RoomConfiguration
+                    new ListenerConfiguration
                     {
-                        Room = "room-${SERVER}",
+                        EventName = "siosub-test",
                         Tag = "SioSub",
                         ChatType = XivChatType.Notice,
                     },
@@ -131,51 +131,49 @@ internal static class ConfigWindow
                 InputText("名称", subscription.Name, value => subscription.Name = value, 128, save);
                 InputText("服务器 URL", subscription.ServerUrl, value => subscription.ServerUrl = value, 512, save);
                 InputText("Socket.IO Path", subscription.Path, value => subscription.Path = value, 128, save);
-                InputText("Join 事件", subscription.JoinEvent, value => subscription.JoinEvent = value, 128, save);
-                InputText("消息事件", subscription.MessageEvent, value => subscription.MessageEvent = value, 128, save);
 
-                if (ImGui.Button("添加 Room", new Vector2(100, 0)))
+                if (ImGui.Button("添加监听事件", new Vector2(120, 0)))
                 {
-                    subscription.Rooms.Add(new RoomConfiguration
+                    subscription.Listeners.Add(new ListenerConfiguration
                     {
-                        Room = "room-${SERVER}",
+                        EventName = "siosub-test",
                         Tag = "SioSub",
                         ChatType = XivChatType.Notice,
                     });
                     save();
                 }
 
-                var removeRoom = -1;
-                for (var roomIndex = 0; roomIndex < subscription.Rooms.Count; roomIndex++)
+                var removeListener = -1;
+                for (var listenerIndex = 0; listenerIndex < subscription.Listeners.Count; listenerIndex++)
                 {
-                    var room = subscription.Rooms[roomIndex];
-                    ImGui.PushID(roomIndex);
+                    var listener = subscription.Listeners[listenerIndex];
+                    ImGui.PushID(listenerIndex);
                     ImGui.Separator();
 
-                    var roomEnabled = room.Enabled;
-                    if (ImGui.Checkbox("启用 Room", ref roomEnabled))
+                    var listenerEnabled = listener.Enabled;
+                    if (ImGui.Checkbox("启用监听", ref listenerEnabled))
                     {
-                        room.Enabled = roomEnabled;
+                        listener.Enabled = listenerEnabled;
                         save();
                     }
 
                     ImGui.SameLine();
-                    if (ImGui.Button("删除 Room", new Vector2(100, 0)))
+                    if (ImGui.Button("删除监听", new Vector2(100, 0)))
                     {
-                        removeRoom = roomIndex;
+                        removeListener = listenerIndex;
                     }
 
-                    InputText("Room", room.Room, value => room.Room = value, 256, save);
-                    ImGui.TextUnformatted($"实际 Room: {resolveVariables(room.Room)}");
-                    InputText("Tag", room.Tag, value => room.Tag = value, 128, save);
-                    DrawChatTypeCombo(room, save);
+                    InputText("监听事件", listener.EventName, value => listener.EventName = value, 256, save);
+                    ImGui.TextUnformatted($"实际事件: {resolveVariables(listener.EventName)}");
+                    InputText("Tag", listener.Tag, value => listener.Tag = value, 128, save);
+                    DrawChatTypeCombo(listener, save);
 
                     ImGui.PopID();
                 }
 
-                if (removeRoom >= 0)
+                if (removeListener >= 0)
                 {
-                    subscription.Rooms.RemoveAt(removeRoom);
+                    subscription.Listeners.RemoveAt(removeListener);
                     save();
                 }
             }
@@ -203,7 +201,7 @@ internal static class ConfigWindow
             ImGui.TableSetupColumn("名称", ImGuiTableColumnFlags.None, 0, 0);
             ImGui.TableSetupColumn("服务器", ImGuiTableColumnFlags.None, 0, 0);
             ImGui.TableSetupColumn("状态", ImGuiTableColumnFlags.None, 0, 0);
-            ImGui.TableSetupColumn("Room", ImGuiTableColumnFlags.None, 0, 0);
+            ImGui.TableSetupColumn("监听事件", ImGuiTableColumnFlags.None, 0, 0);
             ImGui.TableSetupColumn("更新时间", ImGuiTableColumnFlags.None, 0, 0);
             ImGui.TableHeadersRow();
 
@@ -217,7 +215,7 @@ internal static class ConfigWindow
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"{status.State}: {status.Detail}");
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(string.Join(", ", status.Rooms));
+                ImGui.TextUnformatted(string.Join(", ", status.Events));
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(status.UpdatedAt.ToLocalTime().ToString("HH:mm:ss"));
             }
@@ -238,7 +236,7 @@ internal static class ConfigWindow
         {
             ImGui.TableSetupColumn("时间", ImGuiTableColumnFlags.WidthFixed, 82, 0);
             ImGui.TableSetupColumn("订阅", ImGuiTableColumnFlags.WidthFixed, 120, 0);
-            ImGui.TableSetupColumn("Room", ImGuiTableColumnFlags.WidthFixed, 150, 0);
+            ImGui.TableSetupColumn("监听事件", ImGuiTableColumnFlags.WidthFixed, 150, 0);
             ImGui.TableSetupColumn("频道", ImGuiTableColumnFlags.WidthFixed, 110, 0);
             ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthFixed, 100, 0);
             ImGui.TableSetupColumn("文本", ImGuiTableColumnFlags.None, 0, 0);
@@ -252,7 +250,7 @@ internal static class ConfigWindow
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(record.SubscriptionName);
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(record.Room);
+                ImGui.TextUnformatted(record.EventName);
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(record.ChatType.ToString());
                 ImGui.TableNextColumn();
@@ -276,9 +274,9 @@ internal static class ConfigWindow
         }
     }
 
-    private static void DrawChatTypeCombo(RoomConfiguration room, Action save)
+    private static void DrawChatTypeCombo(ListenerConfiguration listener, Action save)
     {
-        var currentIndex = Array.IndexOf(ChatTypes, room.ChatType);
+        var currentIndex = Array.IndexOf(ChatTypes, listener.ChatType);
         if (currentIndex < 0)
         {
             currentIndex = 0;
@@ -287,7 +285,7 @@ internal static class ConfigWindow
         ImGui.SetNextItemWidth(220);
         if (ImGui.Combo("输出频道", ref currentIndex, ChatTypeNames, ChatTypeNames.Length))
         {
-            room.ChatType = ChatTypes[currentIndex];
+            listener.ChatType = ChatTypes[currentIndex];
             save();
         }
     }

@@ -23,5 +23,5 @@ public sealed class SubscriptionStatus
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
 
-    public IReadOnlyList<string> Rooms { get; set; } = [];
+    public IReadOnlyList<string> Events { get; set; } = [];
 }

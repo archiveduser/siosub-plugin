@@ -34,6 +34,7 @@ public sealed class Plugin : IDalamudPlugin
             this.Configuration,
             this.ResolveVariables,
             this.EnqueueChatMessage,
+            this.EnqueueConnectionStatus,
             this.SaveConfiguration);
 
         PluginInterface.UiBuilder.Draw += this.Draw;
@@ -41,10 +42,16 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi += this.OpenConfig;
         CommandManager.AddHandler(CommandName, new CommandInfo(this.OnCommand)
         {
-            HelpMessage = "打开 SioSub 设置窗口。",
+            HelpMessage = "打开 SioSub 设置窗口。使用 /siosub status 查看连接状态。",
         });
 
-        _ = this.subscriptionManager.ReloadAsync();
+        ClientState.Login += this.OnLogin;
+        ClientState.Logout += this.OnLogout;
+
+        if (ClientState.IsLoggedIn)
+        {
+            this.ReloadSubscriptionsForCurrentCharacter();
+        }
     }
 
     internal PluginConfiguration Configuration { get; }
@@ -55,6 +62,8 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.Draw -= this.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= this.OpenConfig;
         PluginInterface.UiBuilder.OpenMainUi -= this.OpenConfig;
+        ClientState.Login -= this.OnLogin;
+        ClientState.Logout -= this.OnLogout;
         this.subscriptionManager.Dispose();
     }
 
@@ -68,6 +77,12 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
+        if (args.Trim().Equals("status", StringComparison.OrdinalIgnoreCase))
+        {
+            this.PrintConnectionStatus();
+            return;
+        }
+
         this.configVisible = true;
     }
 
@@ -87,9 +102,32 @@ public sealed class Plugin : IDalamudPlugin
                 this.Configuration,
                 this.subscriptionManager,
                 this.SaveConfiguration,
-                () => _ = this.subscriptionManager.ReloadAsync(),
+                this.ReloadSubscriptionsForCurrentCharacter,
                 this.ResolveVariables);
         }
+    }
+
+    private void OnLogin()
+    {
+        Log.Info("[SioSub] Character login detected. Connecting subscriptions.");
+        this.ReloadSubscriptionsForCurrentCharacter();
+    }
+
+    private void OnLogout(int type, int code)
+    {
+        Log.Info("[SioSub] Character logout detected. Disconnecting subscriptions. Type={Type}, Code={Code}", type, code);
+        _ = this.subscriptionManager.DisconnectAsync();
+    }
+
+    private void ReloadSubscriptionsForCurrentCharacter()
+    {
+        if (!ClientState.IsLoggedIn)
+        {
+            Log.Info("[SioSub] Not logged in. Subscriptions will connect after character login.");
+            return;
+        }
+
+        _ = this.subscriptionManager.ReloadAsync();
     }
 
     private void FlushChatQueue()
@@ -106,11 +144,73 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void EnqueueChatMessage(RoomConfiguration room, string text)
+    private void EnqueueChatMessage(ListenerConfiguration listener, string text)
     {
-        var tag = string.IsNullOrWhiteSpace(room.Tag) ? string.Empty : $"[{this.ResolveVariables(room.Tag)}]";
+        var tag = string.IsNullOrWhiteSpace(listener.Tag) ? string.Empty : $"[{this.ResolveVariables(listener.Tag)}]";
         var message = $"{tag}{text}";
-        this.chatQueue.Enqueue(new ChatPrintRequest(room.ChatType, message, this.Configuration.SilentChatMessages));
+        this.chatQueue.Enqueue(new ChatPrintRequest(listener.ChatType, message, this.Configuration.SilentChatMessages));
+    }
+
+    private void EnqueueConnectionStatus(ConnectionState state, string subscriptionName, string detail)
+    {
+        var message = $"[SioSub] {subscriptionName}: {StateToText(state)}";
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            message += $" - {detail}";
+        }
+
+        switch (state)
+        {
+            case ConnectionState.Error:
+                Log.Error(message);
+                break;
+            case ConnectionState.Disconnected:
+                Log.Warning(message);
+                break;
+            default:
+                Log.Info(message);
+                break;
+        }
+    }
+
+    private static string StateToText(ConnectionState state)
+    {
+        return state switch
+        {
+            ConnectionState.Disabled => "已禁用",
+            ConnectionState.Disconnected => "已断开",
+            ConnectionState.Connecting => "连接中",
+            ConnectionState.Connected => "已连接",
+            ConnectionState.Error => "连接错误",
+            _ => state.ToString(),
+        };
+    }
+
+    private void PrintConnectionStatus()
+    {
+        if (!ClientState.IsLoggedIn)
+        {
+            this.EnqueueSystemMessage("[SioSub] 当前未登录角色，订阅未连接。");
+            return;
+        }
+
+        var statuses = this.subscriptionManager.Statuses.ToArray();
+        if (statuses.Length == 0)
+        {
+            this.EnqueueSystemMessage("[SioSub] 当前没有订阅状态。");
+            return;
+        }
+
+        foreach (var status in statuses)
+        {
+            var events = status.Events.Count == 0 ? "无监听事件" : string.Join(", ", status.Events);
+            this.EnqueueSystemMessage($"[SioSub] {status.Name}: {StateToText(status.State)} - {status.Detail}; {status.ServerUrl}; 监听: {events}");
+        }
+    }
+
+    private void EnqueueSystemMessage(string message)
+    {
+        this.chatQueue.Enqueue(new ChatPrintRequest(XivChatType.SystemMessage, message, true));
     }
 
     private string ResolveVariables(string value)

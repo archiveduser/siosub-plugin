@@ -39,6 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="test_*.cs" />
     <None Include="SioSub.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

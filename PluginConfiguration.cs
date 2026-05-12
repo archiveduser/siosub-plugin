@@ -20,14 +20,14 @@ public sealed class PluginConfiguration : IPluginConfiguration
             [
                 new SubscriptionConfiguration
                 {
-                    Name = "默认订阅",
+                    Name = "本地测试服务器",
                     ServerUrl = "http://127.0.0.1:3000",
-                    Rooms =
+                    Listeners =
                     [
-                        new RoomConfiguration
+                        new ListenerConfiguration
                         {
-                            Room = "room-${SERVER}",
-                            Tag = "SioSub",
+                            EventName = "siosub-test",
+                            Tag = "LOCAL",
                             ChatType = XivChatType.Notice,
                         },
                     ],
@@ -59,11 +59,7 @@ public sealed class SubscriptionConfiguration
 
     public string Path { get; set; } = "/socket.io";
 
-    public string JoinEvent { get; set; } = "join";
-
-    public string MessageEvent { get; set; } = "message";
-
-    public List<RoomConfiguration> Rooms { get; set; } = [];
+    public List<ListenerConfiguration> Listeners { get; set; } = [];
 
     public void EnsureValid()
     {
@@ -75,25 +71,23 @@ public sealed class SubscriptionConfiguration
         this.Name ??= string.Empty;
         this.ServerUrl ??= string.Empty;
         this.Path = string.IsNullOrWhiteSpace(this.Path) ? "/socket.io" : this.Path;
-        this.JoinEvent = string.IsNullOrWhiteSpace(this.JoinEvent) ? "join" : this.JoinEvent;
-        this.MessageEvent = string.IsNullOrWhiteSpace(this.MessageEvent) ? "message" : this.MessageEvent;
-        this.Rooms ??= [];
+        this.Listeners ??= [];
 
-        foreach (var room in this.Rooms)
+        foreach (var listener in this.Listeners)
         {
-            room.EnsureValid();
+            listener.EnsureValid();
         }
     }
 }
 
 [Serializable]
-public sealed class RoomConfiguration
+public sealed class ListenerConfiguration
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
     public bool Enabled { get; set; } = true;
 
-    public string Room { get; set; } = string.Empty;
+    public string EventName { get; set; } = string.Empty;
 
     public XivChatType ChatType { get; set; } = XivChatType.Notice;
 
@@ -106,7 +100,7 @@ public sealed class RoomConfiguration
             this.Id = Guid.NewGuid();
         }
 
-        this.Room ??= string.Empty;
+        this.EventName ??= string.Empty;
         this.Tag ??= string.Empty;
     }
 }

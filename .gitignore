@@ -45,8 +45,15 @@ __pycache__/
 venv/
 env/
 
+# Node.js local test server
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
 # Local test scripts and scratch files
 test_
 test_*
+!test_socketio_server.js
 *.log
 *.tmp

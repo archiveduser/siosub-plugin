@@ -1,0 +1,15 @@
+{
+  "name": "siosub-local-test-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Socket.IO test server for the SioSub Dalamud plugin.",
+  "scripts": {
+    "test:server": "node test_socketio_server.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

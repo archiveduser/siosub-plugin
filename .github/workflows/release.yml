@@ -92,3 +92,37 @@ jobs:
           } else {
             gh release create $tag $asset --title $tag --notes "SioSub $env:PLUGIN_VERSION"
           }
+
+      - name: Dispatch sync repository update
+        shell: pwsh
+        env:
+          SYNC_REPO_DISPATCH_TOKEN: ${{ secrets.SYNC_REPO_DISPATCH_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SYNC_REPO_DISPATCH_TOKEN)) {
+            throw "Missing SYNC_REPO_DISPATCH_TOKEN secret. It must have Contents: write access to archiveduser/sync."
+          }
+
+          $assetUrl = "${{ github.server_url }}/${{ github.repository }}/releases/download/$env:RELEASE_TAG/$env:ASSET_NAME"
+          $runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $payload = @{
+            event_type = 'dalamud-plugin-release'
+            client_payload = @{
+              source_repo = '${{ github.repository }}'
+              internal_name = 'SioSub'
+              release_tag = $env:RELEASE_TAG
+              asset_name = $env:ASSET_NAME
+              asset_url = $assetUrl
+              run_url = $runUrl
+            }
+          } | ConvertTo-Json -Depth 10
+
+          Invoke-RestMethod `
+            -Method Post `
+            -Uri 'https://api.github.com/repos/archiveduser/sync/dispatches' `
+            -Headers @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:SYNC_REPO_DISPATCH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+            } `
+            -Body $payload `
+            -ContentType 'application/json'

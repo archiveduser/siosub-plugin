@@ -55,5 +55,6 @@ yarn-error.log*
 test_
 test_*
 !test_socketio_server.js
+!test_broadcast.js
 *.log
 *.tmp

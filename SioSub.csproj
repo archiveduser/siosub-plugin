@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <LangVersion>latest</LangVersion>
@@ -12,27 +12,10 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin\$(Configuration)\</OutputPath>
-    <DalamudLibPath>C:\Users\kamino\AppData\Roaming\XIVLauncherCN\addon\Hooks\dev\</DalamudLibPath>
+    <DalamudLibPath Condition="'$(DALAMUD_HOME)' == '' and !Exists('$(DalamudLibPath)Dalamud.dll') and Exists('$(AppData)\XIVLauncherCN\addon\Hooks\dev\Dalamud.dll')">$(AppData)\XIVLauncherCN\addon\Hooks\dev\</DalamudLibPath>
+    <AssemblySearchPaths>$(AssemblySearchPaths);$(DalamudLibPath)</AssemblySearchPaths>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
-
-  <ItemGroup>
-    <Reference Include="Dalamud">
-      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Dalamud.Bindings.ImGui">
-      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Lumina">
-      <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Lumina.Excel">
-      <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SocketIOClient" Version="3.1.2" />

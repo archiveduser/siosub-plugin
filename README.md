@@ -41,6 +41,8 @@ Each subscription connects to one Socket.IO server. A subscription can contain m
 [TAG]text
 ```
 
+Each listened event can set its own output channel, tag, and tag color. Tag colors use FFXIV `UIColor` IDs; the settings window includes common presets and a custom ID field.
+
 Event and tag fields support variables:
 
 - `${DATACENTER}`: current data center name
@@ -98,3 +100,17 @@ The local server sends one `siosub-test` event every 5 seconds. It does not requ
   "timestamp": "2026-05-10T00:00:00+00:00"
 }
 ```
+
+There is also a push-compatible broadcast test server:
+
+```powershell
+npm run test:broadcast
+```
+
+It accepts the same `/push` style as older test servers:
+
+```powershell
+Invoke-WebRequest "http://127.0.0.1:23000/push?key=ProFate_LuXingNiao&value=TestText"
+```
+
+For SioSub, it emits the Socket.IO event named by `key` with the text from `value`. With the example above, configure a listener for `ProFate_LuXingNiao` and the plugin will print `TestText`.

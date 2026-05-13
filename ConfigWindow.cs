@@ -23,6 +23,24 @@ internal static class ConfigWindow
 
     private static readonly string[] ChatTypeNames = ChatTypes.Select(type => type.ToString()).ToArray();
 
+    private static readonly TagColorPreset[] TagColorPresets =
+    [
+        new("白色", 1, new Vector4(1.00f, 1.00f, 1.00f, 1.00f)),
+        new("黄色", 45, new Vector4(1.00f, 0.86f, 0.22f, 1.00f)),
+        new("橙色", 500, new Vector4(1.00f, 0.55f, 0.18f, 1.00f)),
+        new("红色", 17, new Vector4(1.00f, 0.28f, 0.28f, 1.00f)),
+        new("绿色", 43, new Vector4(0.36f, 0.90f, 0.42f, 1.00f)),
+        new("青色", 37, new Vector4(0.30f, 0.82f, 1.00f, 1.00f)),
+        new("蓝色", 34, new Vector4(0.45f, 0.62f, 1.00f, 1.00f)),
+        new("紫色", 39, new Vector4(0.82f, 0.55f, 1.00f, 1.00f)),
+        new("Dalamud", 540, new Vector4(0.82f, 0.55f, 1.00f, 1.00f)),
+    ];
+
+    private static readonly string[] TagColorNames = TagColorPresets
+        .Select(preset => $"{preset.Name} ({preset.ColorKey})")
+        .Concat(["自定义"])
+        .ToArray();
+
     public static void Draw(
         ref bool visible,
         PluginConfiguration configuration,
@@ -97,6 +115,8 @@ internal static class ConfigWindow
                     {
                         EventName = "siosub-test",
                         Tag = "SioSub",
+                        TagColorEnabled = true,
+                        TagColorKey = 540,
                         ChatType = XivChatType.Notice,
                     },
                 ],
@@ -138,6 +158,8 @@ internal static class ConfigWindow
                     {
                         EventName = "siosub-test",
                         Tag = "SioSub",
+                        TagColorEnabled = true,
+                        TagColorKey = 540,
                         ChatType = XivChatType.Notice,
                     });
                     save();
@@ -166,6 +188,7 @@ internal static class ConfigWindow
                     InputText("监听事件", listener.EventName, value => listener.EventName = value, 256, save);
                     ImGui.TextUnformatted($"实际事件: {resolveVariables(listener.EventName)}");
                     InputText("Tag", listener.Tag, value => listener.Tag = value, 128, save);
+                    DrawTagColorControls(listener, save);
                     DrawChatTypeCombo(listener, save);
 
                     ImGui.PopID();
@@ -289,4 +312,50 @@ internal static class ConfigWindow
             save();
         }
     }
+
+    private static void DrawTagColorControls(ListenerConfiguration listener, Action save)
+    {
+        var tagColorEnabled = listener.TagColorEnabled;
+        if (ImGui.Checkbox("Tag 上色", ref tagColorEnabled))
+        {
+            listener.TagColorEnabled = tagColorEnabled;
+            save();
+        }
+
+        ImGui.SameLine();
+        var previewColor = TagColorPresets.FirstOrDefault(preset => preset.ColorKey == listener.TagColorKey).PreviewColor;
+        if (previewColor == Vector4.Zero)
+        {
+            previewColor = new Vector4(1, 1, 1, 1);
+        }
+
+        ImGui.ColorButton("Tag颜色预览", in previewColor, ImGuiColorEditFlags.NoTooltip, new Vector2(24, 24));
+
+        var currentIndex = Array.FindIndex(TagColorPresets, preset => preset.ColorKey == listener.TagColorKey);
+        if (currentIndex < 0)
+        {
+            currentIndex = TagColorPresets.Length;
+        }
+
+        ImGui.SetNextItemWidth(220);
+        if (ImGui.Combo("Tag 颜色", ref currentIndex, TagColorNames, TagColorNames.Length))
+        {
+            if (currentIndex >= 0 && currentIndex < TagColorPresets.Length)
+            {
+                listener.TagColorKey = TagColorPresets[currentIndex].ColorKey;
+            }
+
+            save();
+        }
+
+        var colorKeyInt = (int)listener.TagColorKey;
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("UIColor ID", ref colorKeyInt, 1, 10, "%d", ImGuiInputTextFlags.None))
+        {
+            listener.TagColorKey = (ushort)Math.Clamp(colorKeyInt, 0, (int)ushort.MaxValue);
+            save();
+        }
+    }
+
+    private readonly record struct TagColorPreset(string Name, ushort ColorKey, Vector4 PreviewColor);
 }

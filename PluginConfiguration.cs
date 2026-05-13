@@ -28,6 +28,8 @@ public sealed class PluginConfiguration : IPluginConfiguration
                         {
                             EventName = "siosub-test",
                             Tag = "LOCAL",
+                            TagColorEnabled = true,
+                            TagColorKey = 540,
                             ChatType = XivChatType.Notice,
                         },
                     ],
@@ -92,6 +94,10 @@ public sealed class ListenerConfiguration
     public XivChatType ChatType { get; set; } = XivChatType.Notice;
 
     public string Tag { get; set; } = "SioSub";
+
+    public bool TagColorEnabled { get; set; } = true;
+
+    public ushort TagColorKey { get; set; } = 540;
 
     public void EnsureValid()
     {

@@ -137,7 +137,7 @@ public sealed class Plugin : IDalamudPlugin
             ChatGui.Print(new XivChatEntry
             {
                 Type = request.ChatType,
-                Message = new SeString(new TextPayload(request.Text)),
+                Message = request.Message,
                 Name = new SeString(),
                 Silent = request.Silent,
             });
@@ -146,9 +146,25 @@ public sealed class Plugin : IDalamudPlugin
 
     private void EnqueueChatMessage(ListenerConfiguration listener, string text)
     {
-        var tag = string.IsNullOrWhiteSpace(listener.Tag) ? string.Empty : $"[{this.ResolveVariables(listener.Tag)}]";
-        var message = $"{tag}{text}";
-        this.chatQueue.Enqueue(new ChatPrintRequest(listener.ChatType, message, this.Configuration.SilentChatMessages));
+        var builder = new SeStringBuilder();
+        var tag = this.ResolveVariables(listener.Tag);
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            if (listener.TagColorEnabled)
+            {
+                builder.AddUiForeground(listener.TagColorKey);
+            }
+
+            builder.AddText($"[{tag}]");
+
+            if (listener.TagColorEnabled)
+            {
+                builder.AddUiForegroundOff();
+            }
+        }
+
+        builder.AddText(text);
+        this.chatQueue.Enqueue(new ChatPrintRequest(listener.ChatType, builder.BuiltString, this.Configuration.SilentChatMessages));
     }
 
     private void EnqueueConnectionStatus(ConnectionState state, string subscriptionName, string detail)
@@ -210,7 +226,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void EnqueueSystemMessage(string message)
     {
-        this.chatQueue.Enqueue(new ChatPrintRequest(XivChatType.SystemMessage, message, true));
+        this.chatQueue.Enqueue(new ChatPrintRequest(XivChatType.SystemMessage, new SeString(new TextPayload(message)), true));
     }
 
     private string ResolveVariables(string value)
@@ -249,5 +265,5 @@ public sealed class Plugin : IDalamudPlugin
             .Replace("${DATACENTER}", dataCenter, StringComparison.OrdinalIgnoreCase);
     }
 
-    private readonly record struct ChatPrintRequest(XivChatType ChatType, string Text, bool Silent);
+    private readonly record struct ChatPrintRequest(XivChatType ChatType, SeString Message, bool Silent);
 }

@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          $versionInfo = Invoke-RestMethod -Uri https://kamori.goats.dev/Dalamud/Release/VersionInfo
+          $dalamudZip = Join-Path $env:RUNNER_TEMP 'dalamud.zip'
+          $dalamudHome = Join-Path $env:RUNNER_TEMP 'dalamud'
+
+          Invoke-WebRequest -Uri $versionInfo.downloadUrl -OutFile $dalamudZip
+          Expand-Archive -Path $dalamudZip -DestinationPath $dalamudHome -Force
+
+          "DALAMUD_HOME=$dalamudHome" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Read plugin version
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -Raw .\SioSub.json | ConvertFrom-Json
+          $version = [string]$manifest.AssemblyVersion
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            [xml]$project = Get-Content -Raw .\SioSub.csproj
+            $version = [string]($project.Project.PropertyGroup | Select-Object -First 1).Version
+          }
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Could not determine plugin version from SioSub.json AssemblyVersion or SioSub.csproj Version."
+          }
+
+          "PLUGIN_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_TAG=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ASSET_NAME=SioSub-$version.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Restore
+        run: dotnet restore .\SioSub.csproj --locked-mode
+
+      - name: Build
+        run: dotnet build .\SioSub.csproj --configuration Release --no-restore
+
+      - name: Stage plugin zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path .\bin\Release -Recurse -Filter latest.zip | Select-Object -First 1
+          if ($null -eq $zip) {
+            throw "Dalamud package latest.zip was not generated."
+          }
+
+          New-Item -ItemType Directory -Force -Path .\artifacts | Out-Null
+          Copy-Item -Path $zip.FullName -Destination ".\artifacts\$env:ASSET_NAME" -Force
+          "ASSET_PATH=artifacts/$env:ASSET_NAME" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET_NAME }}
+          path: ${{ env.ASSET_PATH }}
+          if-no-files-found: error
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $asset = $env:ASSET_PATH
+
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag $asset --clobber
+          } else {
+            gh release create $tag $asset --title $tag --notes "SioSub $env:PLUGIN_VERSION"
+          }

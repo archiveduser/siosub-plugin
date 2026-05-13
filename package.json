@@ -4,7 +4,8 @@
   "private": true,
   "description": "Local Socket.IO test server for the SioSub Dalamud plugin.",
   "scripts": {
-    "test:server": "node test_socketio_server.js"
+    "test:server": "node test_socketio_server.js",
+    "test:broadcast": "node test_broadcast.js"
   },
   "dependencies": {
     "socket.io": "^4.7.5"
